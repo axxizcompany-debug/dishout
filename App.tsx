@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { Layout } from './components/Layout';
 import { HomeView } from './components/HomeView';
 import { MapView } from './components/MapView';
@@ -51,6 +52,7 @@ const App: React.FC = () => {
   return (
     <AppProvider>
       <AppContent />
+      <Analytics />
     </AppProvider>
   );
 };
