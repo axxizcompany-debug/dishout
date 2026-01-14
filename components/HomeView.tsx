@@ -38,7 +38,7 @@ export const HomeView: React.FC = () => {
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
-      setError("Camera access denied or not available.");
+      setError("Camera access denied. Please check your browser permissions.");
       setShowCamera(false);
     }
   };
@@ -67,27 +67,36 @@ export const HomeView: React.FC = () => {
     setResults([]);
     setDishInfo(null);
 
-    const base64Data = base64.split(',')[1];
+    // Extract the raw base64 data without the prefix
+    const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
     
     try {
+      // Step 1: AI Identification
       const identification = await identifyDish(base64Data);
       setDishInfo({ name: identification.dishName, description: identification.description });
 
+      if (identification.dishName === "Unknown Dish") {
+          throw new Error("Could not identify food. Try a clearer photo.");
+      }
+
+      // Step 2: Location (Safe wrapper)
       let lat = 25.2048; 
       let lng = 55.2708;
       
-      if (navigator.geolocation) {
-          try {
+      try {
+          if (navigator.geolocation) {
               const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-                  navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+                  navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, enableHighAccuracy: true });
               });
               lat = pos.coords.latitude;
               lng = pos.coords.longitude;
-          } catch (e) {
-              console.warn("Location access failed, using default.");
           }
+      } catch (locErr) {
+          console.warn("Geolocation failed, using default coords:", locErr);
+          // Don't throw, just proceed with default coords
       }
 
+      // Step 3: Map Grounding
       const matched = await findNearbyRestaurantsForDish(identification.dishName, lat, lng);
       setResults(matched);
 
@@ -103,11 +112,11 @@ export const HomeView: React.FC = () => {
       });
       
       if (matched.length === 0) {
-          setError("Dish identified, but no nearby restaurants found on the map.");
+          setError("Dish identified, but no specific restaurants found on the map yet.");
       }
-    } catch (error: any) {
-      console.error("Processing failed", error);
-      setError("AI analysis failed. Please try a clearer photo.");
+    } catch (err: any) {
+      console.error("Detailed Processing Error:", err);
+      setError(err.message || "AI analysis failed. Please ensure the food is clearly visible.");
     } finally {
       setLoading(false);
     }
@@ -203,7 +212,7 @@ export const HomeView: React.FC = () => {
                 {loading && (
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center gap-4 text-white">
                         <Loader2 className="animate-spin text-purple-400" size={48} />
-                        <span className="font-bold tracking-widest text-sm uppercase">AI is analyzing...</span>
+                        <span className="font-bold tracking-widest text-sm uppercase">AI analysis in progress...</span>
                     </div>
                 )}
             </div>

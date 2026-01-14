@@ -44,7 +44,7 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this dish precisely. Provide a name and a short appetizing description." }
+          { text: "Identify this dish precisely. Provide a name and a short appetizing description. Return only valid JSON." }
         ]
       },
       config: {
@@ -60,22 +60,22 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
         thinkingConfig: { thinkingBudget: 0 }
       }
     });
-    return JSON.parse(response.text || "{}");
+    const text = response.text || "{}";
+    return JSON.parse(text);
   } catch (error) {
     console.error("Gemini Vision Error:", error);
-    return { dishName: "Delicious Dish", description: "Freshly prepared gourmet meal." };
+    // Return a structured error fallback instead of throwing to prevent UI crash
+    return { dishName: "Unknown Dish", description: "We couldn't identify this specific dish. Try a clearer image." };
   }
 };
 
 export const findNearbyRestaurantsForDish = async (dishName: string, lat: number, lng: number): Promise<RestaurantMatch[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
-    // We use gemini-2.5-flash-preview-09-2025 as it's a valid full name supporting Maps
+    // Maps grounding is only supported in Gemini 2.5 series models.
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-preview-09-2025',
-      contents: `List real restaurants that serve ${dishName} near coordinates ${lat}, ${lng}. 
-      Format the list as a JSON array of objects with "name", "price" (like "$$"), and "rating" (number). 
-      Example: [{"name": "Great Pizza", "price": "$$", "rating": 4.8}]`,
+      contents: `Find real restaurants that serve ${dishName} near lat: ${lat}, lng: ${lng}. Return as a JSON array of objects with "name", "price", and "rating".`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: {
@@ -91,12 +91,11 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
     const matches = JSON.parse(cleaned);
     const results = Array.isArray(matches) ? matches : [];
     
-    // If the model didn't provide JSON but used Maps, we can try to find chunks in grounding metadata
+    // Fallback if the prompt didn't return JSON but the tool hit grounded metadata
     if (results.length === 0 && response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
        const chunks = response.candidates[0].groundingMetadata.groundingChunks;
-       // Basic fallback logic if prompt fails but tool succeeded
        const mapResults = chunks.filter(c => c.maps).map((c, i) => ({
-           name: c.maps?.title || "Local Spot",
+           name: c.maps?.title || "Nearby Restaurant",
            price: "$$",
            rating: 4.5
        }));
@@ -114,8 +113,8 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
     return results.map((m: any, i: number) => {
       const matchLocation = getRandomOffset(lat, lng);
       return {
-        id: `res_${Date.now()}_${i}`,
-        name: m.name || "Bistro",
+        id: `res_json_${Date.now()}_${i}`,
+        name: m.name || "Local Eatery",
         price: m.price || "$$",
         rating: m.rating || 4.5,
         distance: calculateDistance(lat, lng, matchLocation.lat, matchLocation.lng),
@@ -174,7 +173,7 @@ export const checkPurchaseIntent = async (message: string): Promise<boolean> => 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Determine if the following message shows intent to buy food or visit a restaurant: "${message}".`,
+      contents: `Determine if this message shows intent to buy or visit: "${message}".`,
       config: { 
         responseMimeType: "application/json",
         responseSchema: {
