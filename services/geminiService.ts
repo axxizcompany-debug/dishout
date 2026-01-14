@@ -1,15 +1,21 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { MenuItem, RestaurantMatch } from "../types.ts";
+
+// Note: Removed window.process polyfill and getApiKey helper.
+// The @google/genai library should be initialized using process.env.API_KEY directly.
 
 const cleanJson = (text: string | undefined) => {
   if (!text) return "[]";
   
+  // Try to find an array first
   const firstBracket = text.indexOf('[');
   const lastBracket = text.lastIndexOf(']');
   if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
     return text.substring(firstBracket, lastBracket + 1);
   }
   
+  // Try to find an object
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -36,15 +42,17 @@ const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: numbe
   return (R * c).toFixed(1) + ' km';
 };
 
+// Fix: Correctly initialize GoogleGenAI using process.env.API_KEY as per guidelines
 export const identifyDish = async (base64Image: string): Promise<{ dishName: string; description: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this dish precisely. Provide a name and a short appetizing description. Return only valid JSON." }
+          { text: "Identify this dish. Provide the dish name and a short appetizing description. Return strictly JSON." }
         ]
       },
       config: {
@@ -60,22 +68,27 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
         thinkingConfig: { thinkingBudget: 0 }
       }
     });
-    const text = response.text || "{}";
+    
+    const text = response.text;
+    if (!text) throw new Error("Empty response from AI");
     return JSON.parse(text);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Vision Error:", error);
-    // Return a structured error fallback instead of throwing to prevent UI crash
-    return { dishName: "Unknown Dish", description: "We couldn't identify this specific dish. Try a clearer image." };
+    return { 
+      dishName: "Identification Failed", 
+      description: "Could not identify the dish. Please ensure the food is clearly visible and try again." 
+    };
   }
 };
 
+// Fix: Refactor to prioritize groundingMetadata over parsing response.text when using maps grounding
 export const findNearbyRestaurantsForDish = async (dishName: string, lat: number, lng: number): Promise<RestaurantMatch[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   try {
-    // Maps grounding is only supported in Gemini 2.5 series models.
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-preview-09-2025',
-      contents: `Find real restaurants that serve ${dishName} near lat: ${lat}, lng: ${lng}. Return as a JSON array of objects with "name", "price", and "rating".`,
+      model: 'gemini-2.5-flash',
+      contents: `Find real restaurants that serve ${dishName} near coordinates ${lat}, ${lng}.`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: {
@@ -87,33 +100,33 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
       }
     });
 
+    // Extract place information directly from grounding metadata as per guidelines
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const mapChunks = chunks.filter(c => c.maps);
+
+    if (mapChunks.length > 0) {
+      return mapChunks.map((c, i) => {
+        const loc = getRandomOffset(lat, lng);
+        return {
+          id: `res_map_${Date.now()}_${i}`,
+          name: c.maps?.title || "Nearby Restaurant",
+          price: "$$",
+          rating: 4.5,
+          distance: calculateDistance(lat, lng, loc.lat, loc.lng),
+          location: loc
+        };
+      });
+    }
+
+    // Fallback parsing (though grounding results are prioritized)
     const cleaned = cleanJson(response.text);
     const matches = JSON.parse(cleaned);
     const results = Array.isArray(matches) ? matches : [];
-    
-    // Fallback if the prompt didn't return JSON but the tool hit grounded metadata
-    if (results.length === 0 && response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
-       const chunks = response.candidates[0].groundingMetadata.groundingChunks;
-       const mapResults = chunks.filter(c => c.maps).map((c, i) => ({
-           name: c.maps?.title || "Nearby Restaurant",
-           price: "$$",
-           rating: 4.5
-       }));
-       if (mapResults.length > 0) return mapResults.map((m, i) => {
-           const loc = getRandomOffset(lat, lng);
-           return {
-               id: `res_map_${Date.now()}_${i}`,
-               ...m,
-               distance: calculateDistance(lat, lng, loc.lat, loc.lng),
-               location: loc
-           };
-       });
-    }
 
     return results.map((m: any, i: number) => {
       const matchLocation = getRandomOffset(lat, lng);
       return {
-        id: `res_json_${Date.now()}_${i}`,
+        id: `res_gen_${Date.now()}_${i}`,
         name: m.name || "Local Eatery",
         price: m.price || "$$",
         rating: m.rating || 4.5,
@@ -127,12 +140,13 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
   }
 };
 
+// Fix: Update profile sync to handle potential non-JSON responses when search grounding is active
 export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[], location?: { lat: number, lng: number } }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Extract menu and coordinates for: ${url}.`,
+      contents: `Extract menu and location for: ${url}. Return as JSON.`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: 'application/json',
@@ -161,19 +175,23 @@ export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[
         }
       }
     });
-    return JSON.parse(response.text || "{}");
+    
+    // Use cleanJson to extract JSON from potentially grounded response text
+    const cleaned = cleanJson(response.text);
+    return JSON.parse(cleaned || "{}");
   } catch (error) {
     console.error("Gemini Profile Sync Error:", error);
     return { menu: [] };
   }
 };
 
+// Fix: Standardize client initialization and model usage
 export const checkPurchaseIntent = async (message: string): Promise<boolean> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Determine if this message shows intent to buy or visit: "${message}".`,
+      contents: `Identify if this message implies a desire to order or visit: "${message}".`,
       config: { 
         responseMimeType: "application/json",
         responseSchema: {
@@ -185,7 +203,8 @@ export const checkPurchaseIntent = async (message: string): Promise<boolean> => 
         thinkingConfig: { thinkingBudget: 0 } 
       }
     });
-    const result = JSON.parse(response.text || "{}");
+    const cleaned = cleanJson(response.text);
+    const result = JSON.parse(cleaned || "{}");
     return result.hasIntent || false;
   } catch (error) {
     return false;

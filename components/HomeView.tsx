@@ -32,13 +32,15 @@ export const HomeView: React.FC = () => {
     setShowCamera(true);
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
-      setError("Camera access denied. Please check your browser permissions.");
+      setError("Camera access denied. Please check site permissions.");
       setShowCamera(false);
     }
   };
@@ -50,7 +52,7 @@ export const HomeView: React.FC = () => {
       canvas.height = videoRef.current.videoHeight;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(videoRef.current, 0, 0);
-      const base64 = canvas.toDataURL('image/jpeg');
+      const base64 = canvas.toDataURL('image/jpeg', 0.8);
       
       const stream = videoRef.current.srcObject as MediaStream;
       stream?.getTracks().forEach(track => track.stop());
@@ -67,36 +69,38 @@ export const HomeView: React.FC = () => {
     setResults([]);
     setDishInfo(null);
 
-    // Extract the raw base64 data without the prefix
     const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
     
     try {
-      // Step 1: AI Identification
+      // AI Identification
       const identification = await identifyDish(base64Data);
+      
+      if (identification.dishName === "Identification Failed") {
+          throw new Error(identification.description);
+      }
+      
       setDishInfo({ name: identification.dishName, description: identification.description });
 
-      if (identification.dishName === "Unknown Dish") {
-          throw new Error("Could not identify food. Try a clearer photo.");
-      }
-
-      // Step 2: Location (Safe wrapper)
+      // Get Coordinates
       let lat = 25.2048; 
       let lng = 55.2708;
       
       try {
           if (navigator.geolocation) {
               const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-                  navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, enableHighAccuracy: true });
+                  navigator.geolocation.getCurrentPosition(resolve, reject, { 
+                      timeout: 10000, 
+                      enableHighAccuracy: false // Faster for discovery
+                  });
               });
               lat = pos.coords.latitude;
               lng = pos.coords.longitude;
           }
       } catch (locErr) {
-          console.warn("Geolocation failed, using default coords:", locErr);
-          // Don't throw, just proceed with default coords
+          console.warn("Location check skipped or timed out, using default city center.");
       }
 
-      // Step 3: Map Grounding
+      // Localized Search
       const matched = await findNearbyRestaurantsForDish(identification.dishName, lat, lng);
       setResults(matched);
 
@@ -112,11 +116,11 @@ export const HomeView: React.FC = () => {
       });
       
       if (matched.length === 0) {
-          setError("Dish identified, but no specific restaurants found on the map yet.");
+          setError("Dish identified, but no specific restaurant matches found in this area.");
       }
     } catch (err: any) {
-      console.error("Detailed Processing Error:", err);
-      setError(err.message || "AI analysis failed. Please ensure the food is clearly visible.");
+      console.error("Process Image Error:", err);
+      setError(err.message || "AI Analysis Failed. Please try a clearer photo.");
     } finally {
       setLoading(false);
     }
@@ -137,13 +141,13 @@ export const HomeView: React.FC = () => {
     <div className="h-full flex flex-col bg-[#0f0718]">
       <div className="p-6 pb-2">
         <h1 className="text-3xl font-black text-white">Find your next <span className="text-purple-400">craving</span></h1>
-        <p className="text-gray-400 mt-1 text-sm">Scan any food photo to find restaurants serving it nearby.</p>
+        <p className="text-gray-400 mt-1 text-sm">Scan any food photo to discover where to eat it.</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-20">
         {error && (
             <div className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl flex items-center gap-3 text-red-200 text-sm animate-fade-in">
-                <AlertCircle size={20} className="shrink-0" />
+                <AlertCircle size={20} className="shrink-0 text-red-400" />
                 <p>{error}</p>
             </div>
         )}
@@ -157,7 +161,7 @@ export const HomeView: React.FC = () => {
                 <div className="w-16 h-16 bg-purple-600 rounded-full flex items-center justify-center shadow-lg group-active:scale-90 transition-transform">
                     <Camera className="text-white" size={32} />
                 </div>
-                <span className="font-bold text-gray-300">Take a Photo</span>
+                <span className="font-bold text-gray-300">Open Camera</span>
             </button>
             <div className="flex items-center gap-4">
                 <div className="h-px flex-1 bg-white/10"></div>
@@ -169,7 +173,7 @@ export const HomeView: React.FC = () => {
                 className="w-full py-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center gap-3 font-bold text-gray-300 hover:bg-white/10 transition-all"
             >
                 <ImageIcon size={20} />
-                Upload from Gallery
+                Gallery Upload
             </button>
             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
           </div>
@@ -200,7 +204,7 @@ export const HomeView: React.FC = () => {
         {image && (
           <div className="space-y-6 animate-fade-in">
             <div className="relative rounded-3xl overflow-hidden border-2 border-purple-500/30">
-                <img src={image} className="w-full aspect-[4/3] object-cover" alt="Scanned food" />
+                <img src={image} className="w-full aspect-[4/3] object-cover" alt="Captured food" />
                 {!loading && (
                   <button 
                       onClick={() => { setImage(null); setDishInfo(null); setResults([]); setError(null); }}
@@ -210,9 +214,9 @@ export const HomeView: React.FC = () => {
                   </button>
                 )}
                 {loading && (
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center gap-4 text-white">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4 text-white">
                         <Loader2 className="animate-spin text-purple-400" size={48} />
-                        <span className="font-bold tracking-widest text-sm uppercase">AI analysis in progress...</span>
+                        <span className="font-black tracking-widest text-sm uppercase">DishOut AI is Thinking...</span>
                     </div>
                 )}
             </div>
@@ -221,7 +225,7 @@ export const HomeView: React.FC = () => {
                 <div className="bg-purple-900/20 border border-purple-500/20 rounded-3xl p-6 space-y-2">
                     <div className="flex items-center gap-2 text-purple-400">
                         <Utensils size={18} />
-                        <span className="text-xs font-black uppercase tracking-widest">Matched Dish</span>
+                        <span className="text-xs font-black uppercase tracking-widest">Identification</span>
                     </div>
                     <h2 className="text-2xl font-bold text-white">{dishInfo.name}</h2>
                     <p className="text-gray-400 text-sm leading-relaxed">{dishInfo.description}</p>
@@ -237,7 +241,7 @@ export const HomeView: React.FC = () => {
                     <div className="space-y-3">
                         {results.map((res) => (
                             <div key={res.id} className="bg-[#1a0b2e] border border-white/5 rounded-2xl p-4 flex items-center gap-4 hover:border-purple-500/30 transition-all">
-                                <div className="w-16 h-16 bg-purple-600/20 rounded-xl flex items-center justify-center text-purple-400 shrink-0">
+                                <div className="w-14 h-14 bg-purple-600/20 rounded-xl flex items-center justify-center text-purple-400 shrink-0">
                                     <Utensils size={24} />
                                 </div>
                                 <div className="flex-1 min-w-0">
