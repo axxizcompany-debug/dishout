@@ -1,25 +1,20 @@
-
 import React, { useRef, useState } from 'react';
-import { Camera, Utensils, X, MapPin, Image as ImageIcon, Loader2, Star } from 'lucide-react';
+import { Camera, Utensils, X, MapPin, Image as ImageIcon, Loader2, Star, AlertCircle } from 'lucide-react';
 import { useAppStore } from '../services/store.tsx';
 import { identifyDish, findNearbyRestaurantsForDish } from '../services/geminiService.ts';
 import { RestaurantMatch } from '../types.ts';
 
-/**
- * HomeView component allows users to discover restaurants by scanning food items.
- * Fixes the error: Module '"./components/HomeView.tsx"' has no exported member 'HomeView'.
- */
 export const HomeView: React.FC = () => {
   const { dispatch } = useAppStore();
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<RestaurantMatch[]>([]);
   const [dishInfo, setDishInfo] = useState<{ name: string; description: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showCamera, setShowCamera] = useState(false);
 
-  // Handle image upload from file system
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -33,9 +28,9 @@ export const HomeView: React.FC = () => {
     }
   };
 
-  // Activate device camera
   const startCamera = async () => {
     setShowCamera(true);
+    setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       if (videoRef.current) {
@@ -43,11 +38,11 @@ export const HomeView: React.FC = () => {
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
+      setError("Camera access denied or not available.");
       setShowCamera(false);
     }
   };
 
-  // Capture frame from video stream
   const capturePhoto = () => {
     if (videoRef.current) {
       const canvas = document.createElement('canvas');
@@ -66,38 +61,36 @@ export const HomeView: React.FC = () => {
     }
   };
 
-  // Use Gemini to process the captured or uploaded image
   const processImage = async (base64: string) => {
     setLoading(true);
+    setError(null);
     setResults([]);
     setDishInfo(null);
 
     const base64Data = base64.split(',')[1];
     
     try {
-      // Step 1: Identify dish using Gemini 3 Flash
       const identification = await identifyDish(base64Data);
       setDishInfo({ name: identification.dishName, description: identification.description });
 
-      // Step 2: Determine user's location
-      let lat = 25.2048; // Default to Dubai
+      let lat = 25.2048; 
       let lng = 55.2708;
       
       if (navigator.geolocation) {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject);
-          }).catch(() => null);
-          if (pos) {
+          try {
+              const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+                  navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+              });
               lat = pos.coords.latitude;
               lng = pos.coords.longitude;
+          } catch (e) {
+              console.warn("Location access failed, using default.");
           }
       }
 
-      // Step 3: Find nearby restaurants using Gemini 2.5 Flash with Maps grounding
       const matched = await findNearbyRestaurantsForDish(identification.dishName, lat, lng);
       setResults(matched);
 
-      // Step 4: Add the scan event to global history
       dispatch({
         type: 'ADD_SCAN',
         payload: {
@@ -108,8 +101,13 @@ export const HomeView: React.FC = () => {
           matchedRestaurants: matched
         }
       });
-    } catch (error) {
+      
+      if (matched.length === 0) {
+          setError("Dish identified, but no nearby restaurants found on the map.");
+      }
+    } catch (error: any) {
       console.error("Processing failed", error);
+      setError("AI analysis failed. Please try a clearer photo.");
     } finally {
       setLoading(false);
     }
@@ -134,6 +132,13 @@ export const HomeView: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-20">
+        {error && (
+            <div className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl flex items-center gap-3 text-red-200 text-sm animate-fade-in">
+                <AlertCircle size={20} className="shrink-0" />
+                <p>{error}</p>
+            </div>
+        )}
+
         {!image && !showCamera && (
           <div className="space-y-4">
             <button 
@@ -189,7 +194,7 @@ export const HomeView: React.FC = () => {
                 <img src={image} className="w-full aspect-[4/3] object-cover" alt="Scanned food" />
                 {!loading && (
                   <button 
-                      onClick={() => { setImage(null); setDishInfo(null); setResults([]); }}
+                      onClick={() => { setImage(null); setDishInfo(null); setResults([]); setError(null); }}
                       className="absolute top-4 right-4 p-2 bg-black/60 text-white rounded-full hover:bg-black"
                   >
                       <X size={20} />
@@ -198,7 +203,7 @@ export const HomeView: React.FC = () => {
                 {loading && (
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center gap-4 text-white">
                         <Loader2 className="animate-spin text-purple-400" size={48} />
-                        <span className="font-bold tracking-widest text-sm">IDENTIFYING...</span>
+                        <span className="font-bold tracking-widest text-sm uppercase">AI is analyzing...</span>
                     </div>
                 )}
             </div>

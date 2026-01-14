@@ -4,21 +4,18 @@ import { MenuItem, RestaurantMatch } from "../types.ts";
 const cleanJson = (text: string | undefined) => {
   if (!text) return "[]";
   
-  // Prioritize finding an array block first
   const firstBracket = text.indexOf('[');
   const lastBracket = text.lastIndexOf(']');
   if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
     return text.substring(firstBracket, lastBracket + 1);
   }
   
-  // Then try to find an object block
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       return text.substring(firstBrace, lastBrace + 1);
   }
   
-  // If no JSON-like structures are found, return an empty array string to prevent JSON.parse errors
   return "[]";
 };
 
@@ -47,15 +44,23 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this dish precisely. Return ONLY a JSON object: { \"dishName\": \"...\", \"description\": \"...\" }" }
+          { text: "Identify this dish precisely. Provide a name and a short appetizing description." }
         ]
       },
       config: {
         responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            dishName: { type: Type.STRING },
+            description: { type: Type.STRING }
+          },
+          required: ["dishName", "description"]
+        },
         thinkingConfig: { thinkingBudget: 0 }
       }
     });
-    return JSON.parse(cleanJson(response.text));
+    return JSON.parse(response.text || "{}");
   } catch (error) {
     console.error("Gemini Vision Error:", error);
     return { dishName: "Delicious Dish", description: "Freshly prepared gourmet meal." };
@@ -65,11 +70,12 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
 export const findNearbyRestaurantsForDish = async (dishName: string, lat: number, lng: number): Promise<RestaurantMatch[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
+    // We use gemini-2.5-flash-preview-09-2025 as it's a valid full name supporting Maps
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Search for real restaurants serving ${dishName} near lat: ${lat}, lng: ${lng}. 
-      Return ONLY a JSON array of objects. Each object MUST have: "name", "price" (e.g., "$$"), and "rating" (number).
-      If no restaurants are found, return exactly []. Do not include any text or conversation.`,
+      model: 'gemini-2.5-flash-preview-09-2025',
+      contents: `List real restaurants that serve ${dishName} near coordinates ${lat}, ${lng}. 
+      Format the list as a JSON array of objects with "name", "price" (like "$$"), and "rating" (number). 
+      Example: [{"name": "Great Pizza", "price": "$$", "rating": 4.8}]`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: {
@@ -85,6 +91,26 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
     const matches = JSON.parse(cleaned);
     const results = Array.isArray(matches) ? matches : [];
     
+    // If the model didn't provide JSON but used Maps, we can try to find chunks in grounding metadata
+    if (results.length === 0 && response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
+       const chunks = response.candidates[0].groundingMetadata.groundingChunks;
+       // Basic fallback logic if prompt fails but tool succeeded
+       const mapResults = chunks.filter(c => c.maps).map((c, i) => ({
+           name: c.maps?.title || "Local Spot",
+           price: "$$",
+           rating: 4.5
+       }));
+       if (mapResults.length > 0) return mapResults.map((m, i) => {
+           const loc = getRandomOffset(lat, lng);
+           return {
+               id: `res_map_${Date.now()}_${i}`,
+               ...m,
+               distance: calculateDistance(lat, lng, loc.lat, loc.lng),
+               location: loc
+           };
+       });
+    }
+
     return results.map((m: any, i: number) => {
       const matchLocation = getRandomOffset(lat, lng);
       return {
@@ -107,13 +133,36 @@ export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Extract menu and coordinates for: ${url}. Return JSON: { \"menu\": [{\"name\": \"...\", \"description\": \"...\", \"price\": \"... AED\"}], \"location\": {\"lat\": 0, \"lng\": 0} }`,
+      contents: `Extract menu and coordinates for: ${url}.`,
       config: {
         tools: [{ googleSearch: {} }],
-        responseMimeType: 'application/json'
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            menu: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  price: { type: Type.STRING }
+                }
+              }
+            },
+            location: {
+              type: Type.OBJECT,
+              properties: {
+                lat: { type: Type.NUMBER },
+                lng: { type: Type.NUMBER }
+              }
+            }
+          }
+        }
       }
     });
-    return JSON.parse(cleanJson(response.text));
+    return JSON.parse(response.text || "{}");
   } catch (error) {
     console.error("Gemini Profile Sync Error:", error);
     return { menu: [] };
@@ -125,10 +174,20 @@ export const checkPurchaseIntent = async (message: string): Promise<boolean> => 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Is intent to buy or visit present? "${message}". Reply only true/false.`,
-      config: { thinkingConfig: { thinkingBudget: 0 } }
+      contents: `Determine if the following message shows intent to buy food or visit a restaurant: "${message}".`,
+      config: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            hasIntent: { type: Type.BOOLEAN }
+          }
+        },
+        thinkingConfig: { thinkingBudget: 0 } 
+      }
     });
-    return response.text?.toLowerCase().includes('true') || false;
+    const result = JSON.parse(response.text || "{}");
+    return result.hasIntent || false;
   } catch (error) {
     return false;
   }
