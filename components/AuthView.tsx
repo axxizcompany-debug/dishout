@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { useAppStore } from '../services/store';
-import { UserType, Restaurant, User } from '../types';
+import { useAppStore } from '../services/store.tsx';
+import { UserType, Restaurant, User } from '../types.ts';
 import { Mail, Lock, Store, User as UserIcon, Loader2, ArrowRight, MapPin, Globe, AlertCircle, Crosshair } from 'lucide-react';
 
 export const AuthView: React.FC = () => {
@@ -58,7 +58,6 @@ export const AuthView: React.FC = () => {
     setError(null);
     setLoading(true);
 
-    // Optimized: Removed artificial 1200ms delay
     try {
         const usersDb = JSON.parse(localStorage.getItem('dishout_users') || '{}');
         const emailKey = formData.email.toLowerCase().trim();

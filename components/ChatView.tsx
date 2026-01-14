@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { useAppStore } from '../services/store';
+import { useAppStore } from '../services/store.tsx';
 import { Send, ArrowLeft, Check, X, DollarSign, Clock, ShieldCheck, MapPin } from 'lucide-react';
-import { checkPurchaseIntent } from '../services/geminiService';
-import { UserType, ViewState } from '../types';
-import { LEAD_PRICE_AED } from '../constants';
+import { checkPurchaseIntent } from '../services/geminiService.ts';
+import { UserType, ViewState } from '../types.ts';
+import { LEAD_PRICE_AED } from '../constants.ts';
 
 export const ChatView: React.FC = () => {
   const { state, dispatch } = useAppStore();
@@ -12,7 +13,6 @@ export const ChatView: React.FC = () => {
 
   const isRestaurant = state.user?.type === UserType.RESTAURANT;
 
-  // Use global active chat ID
   const activeChatId = state.activeChatId;
   const activeChat = state.chats.find(c => c.id === activeChatId);
 
@@ -36,7 +36,6 @@ export const ChatView: React.FC = () => {
     });
     setInputText('');
 
-    // If User sends message, check intent (simple simulation)
     if (!isRestaurant) {
         const hasIntent = await checkPurchaseIntent(newMessage.text);
         if (hasIntent) {
@@ -81,7 +80,6 @@ export const ChatView: React.FC = () => {
       }
   };
 
-  // Determine Display Name & Avatar
   const displayAvatar = isRestaurant 
     ? `https://ui-avatars.com/api/?name=${activeChat?.userName || 'User'}&background=random`
     : activeChat?.restaurantAvatar;
@@ -90,9 +88,7 @@ export const ChatView: React.FC = () => {
     ? activeChat?.userName
     : activeChat?.restaurantName;
 
-  // 1. Empty State / List View (Only for Users mainly)
   if (!activeChatId || !activeChat) {
-    // If restaurant somehow gets here without active chat, go back to dashboard
     if (isRestaurant) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-center p-6">
@@ -107,7 +103,6 @@ export const ChatView: React.FC = () => {
         );
     }
 
-    // User Chat List
     const userChats = state.chats.filter(c => c.userId === state.user?.id);
     return (
       <div className="h-full flex flex-col bg-[#0f0718]">
@@ -143,12 +138,10 @@ export const ChatView: React.FC = () => {
     );
   }
 
-  // 2. Active Chat Interface
   const isPending = activeChat.status === 'pending';
 
   return (
     <div className="h-full flex flex-col bg-[#0f0718]">
-      {/* Header */}
       <header className="p-4 bg-[#1a0b2e] border-b border-purple-900/50 flex items-center gap-3 shrink-0 shadow-lg z-10">
         <button onClick={handleBack} className="p-2 hover:bg-white/10 rounded-full transition-colors">
           <ArrowLeft size={20} />
@@ -168,7 +161,6 @@ export const ChatView: React.FC = () => {
         </div>
       </header>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {activeChat.messages.map((msg) => {
           const isMe = msg.senderId === state.user?.id;
@@ -205,10 +197,7 @@ export const ChatView: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area / Action Panel */}
       <div className="p-4 bg-[#1a0b2e] border-t border-purple-900/50 shrink-0">
-        
-        {/* Scenario A: Pending Request for Restaurant */}
         {isRestaurant && isPending ? (
             <div className="animate-slide-up bg-[#2e1065] rounded-xl p-4 border border-amber-500/30 shadow-2xl shadow-amber-900/20">
                 <div className="flex items-center justify-between mb-4">
@@ -243,8 +232,6 @@ export const ChatView: React.FC = () => {
                 </div>
             </div>
         ) : 
-        
-        /* Scenario B: Pending for User */
         !isRestaurant && isPending ? (
             <div className="flex items-center gap-3 p-2 bg-white/5 rounded-xl border border-dashed border-gray-600">
                  <div className="w-full text-center py-2 text-gray-400 text-sm italic flex items-center justify-center gap-2">
@@ -253,8 +240,6 @@ export const ChatView: React.FC = () => {
                  </div>
             </div>
         ) :
-
-        /* Scenario C: Active Chat (Normal) */
         (
             <div className="flex items-center gap-2">
                 <input
