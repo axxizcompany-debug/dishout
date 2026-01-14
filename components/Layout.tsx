@@ -1,6 +1,7 @@
+
 import React from 'react';
-import { useAppStore } from '../services/store';
-import { ViewState, UserType } from '../types';
+import { useAppStore } from '../services/store.tsx';
+import { ViewState, UserType } from '../types.ts';
 import { Home, Map, MessageSquare, User } from 'lucide-react';
 
 interface LayoutProps {
@@ -11,7 +12,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { state, dispatch } = useAppStore();
   const isRestaurant = state.user?.type === UserType.RESTAURANT;
 
-  // If Restaurant, simple top bar, no bottom nav (Restaurant dashboard is different)
   if (isRestaurant) {
     return (
       <div className="fixed inset-0 bg-[#0f0718] text-white flex flex-col">
@@ -32,7 +32,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     );
   }
 
-  // User Layout
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState; icon: any; label: string }) => (
     <button
       onClick={() => dispatch({ type: 'SET_VIEW', payload: view })}
@@ -47,12 +46,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div className="fixed inset-0 bg-[#0f0718] text-white flex flex-col overflow-hidden">
-        {/* Main Content Area: Takes available space, handles own scrolling */}
         <main className="flex-1 relative flex flex-col overflow-hidden">
             {children}
         </main>
-
-        {/* Bottom Navigation: Fixed height, sits below main content */}
         <nav className="shrink-0 h-16 bg-[#1a0b2e] border-t border-purple-900/50 flex justify-around items-center z-50 shadow-2xl pb-safe">
             <NavItem view={ViewState.HOME} icon={Home} label="Discover" />
             <NavItem view={ViewState.MAP} icon={Map} label="Map" />

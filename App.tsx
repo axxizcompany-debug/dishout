@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Layout } from './components/Layout';
-import { HomeView } from './components/HomeView';
-import { MapView } from './components/MapView';
-import { ChatView } from './components/ChatView';
-import { ProfileView } from './components/ProfileView';
-import { AuthView } from './components/AuthView';
-import { RestaurantDashboard } from './components/RestaurantDashboard';
-import { UserType, ViewState } from './types';
-import { AppProvider, useAppStore } from './services/store';
+
+import React from 'react';
+import { Layout } from './components/Layout.tsx';
+import { HomeView } from './components/HomeView.tsx';
+import { MapView } from './components/MapView.tsx';
+import { ChatView } from './components/ChatView.tsx';
+import { ProfileView } from './components/ProfileView.tsx';
+import { AuthView } from './components/AuthView.tsx';
+import { RestaurantDashboard } from './components/RestaurantDashboard.tsx';
+import { UserType, ViewState } from './types.ts';
+import { AppProvider, useAppStore } from './services/store.tsx';
 
 const AppContent: React.FC = () => {
   const { state } = useAppStore();
