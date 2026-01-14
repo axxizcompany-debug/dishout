@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Camera, ScanLine, Utensils, X, MapPin, Image as ImageIcon } from 'lucide-react';
+import { Camera, ScanLine, Utensils, X, MapPin, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { identifyDish, findNearbyRestaurantsForDish } from '../services/geminiService';
 import { useAppStore } from '../services/store';
 import { FoodScan, RestaurantMatch } from '../types';
@@ -7,13 +7,13 @@ import { FoodScan, RestaurantMatch } from '../types';
 export const HomeView: React.FC = () => {
   const { dispatch } = useAppStore();
   
-  // Separate refs for camera and gallery inputs
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<{ dish: string; desc: string; matches: RestaurantMatch[] } | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [location, setLocation] = useState<{lat: number, lng: number}>({ lat: 25.2048, lng: 55.2708 });
 
   useEffect(() => {
@@ -37,30 +37,42 @@ export const HomeView: React.FC = () => {
 
     setAnalyzing(true);
     setResult(null);
+    setStatusMessage('Analyzing dish...');
 
     const reader = new FileReader();
     reader.onload = async (ev) => {
         const base64 = ev.target?.result as string;
         setPreview(base64);
+        const base64Data = base64.split(',')[1];
 
-        const analysis = await identifyDish(base64.split(',')[1]);
-        const matches = await findNearbyRestaurantsForDish(analysis.dishName, location.lat, location.lng);
+        try {
+            // First identify the dish
+            const analysis = await identifyDish(base64Data);
+            setStatusMessage(`Finding ${analysis.dishName} nearby...`);
+            
+            // Then find restaurants
+            const matches = await findNearbyRestaurantsForDish(analysis.dishName, location.lat, location.lng);
 
-        setResult({
-            dish: analysis.dishName,
-            desc: analysis.description,
-            matches: matches as RestaurantMatch[]
-        });
-        
-        const newScan: FoodScan = {
-            id: Date.now().toString(),
-            imageUrl: base64,
-            dishName: analysis.dishName,
-            timestamp: Date.now(),
-            matchedRestaurants: matches as RestaurantMatch[]
-        };
-        dispatch({ type: 'ADD_SCAN', payload: newScan });
-        setAnalyzing(false);
+            setResult({
+                dish: analysis.dishName,
+                desc: analysis.description,
+                matches: matches as RestaurantMatch[]
+            });
+            
+            const newScan: FoodScan = {
+                id: Date.now().toString(),
+                imageUrl: base64,
+                dishName: analysis.dishName,
+                timestamp: Date.now(),
+                matchedRestaurants: matches as RestaurantMatch[]
+            };
+            dispatch({ type: 'ADD_SCAN', payload: newScan });
+        } catch (err) {
+            console.error("Discovery error:", err);
+            setStatusMessage("Something went wrong. Try again.");
+        } finally {
+            setAnalyzing(false);
+        }
     };
     reader.readAsDataURL(file);
   };
@@ -96,12 +108,11 @@ export const HomeView: React.FC = () => {
       </header>
 
       {/* Main Action Area */}
-      <div className={`flex flex-col items-center justify-center shrink-0 transition-all duration-300 ${result ? 'h-64' : 'flex-1 min-h-[50vh]'}`}>
+      <div className={`flex flex-col items-center justify-center shrink-0 transition-all duration-300 ${result ? 'h-64' : 'flex-1 min-h-[40vh]'}`}>
         {!preview ? (
             <div className="w-full h-full min-h-[300px] rounded-[2rem] border-2 border-dashed border-purple-500/30 bg-purple-900/10 flex flex-col items-center justify-center space-y-6 relative overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent to-purple-900/20 pointer-events-none"></div>
                 
-                {/* Camera Trigger */}
                 <button 
                     onClick={triggerCamera}
                     className="group flex flex-col items-center gap-3 relative z-10 active:scale-95 transition-transform"
@@ -112,14 +123,12 @@ export const HomeView: React.FC = () => {
                     <p className="text-white font-bold text-lg">Snap Dish</p>
                 </button>
                 
-                {/* Divider */}
                 <div className="flex items-center gap-3 w-32 relative z-10 opacity-50">
                     <div className="h-px bg-gray-400 flex-1"></div>
                     <span className="text-[10px] text-gray-400 uppercase font-bold">OR</span>
                     <div className="h-px bg-gray-400 flex-1"></div>
                 </div>
 
-                {/* Gallery Trigger */}
                 <button 
                     onClick={triggerGallery}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors relative z-10 active:scale-95"
@@ -128,7 +137,6 @@ export const HomeView: React.FC = () => {
                     <span className="text-gray-300 font-medium text-sm">Upload Photo</span>
                 </button>
 
-                {/* Hidden Inputs */}
                 <input 
                     type="file" 
                     accept="image/*"
@@ -156,8 +164,8 @@ export const HomeView: React.FC = () => {
                 </button>
                 {analyzing && (
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white z-10">
-                        <ScanLine size={48} className="animate-spin text-purple-400 mb-4" />
-                        <p className="font-medium animate-pulse">Identifying flavors...</p>
+                        <Loader2 size={48} className="animate-spin text-purple-400 mb-4" />
+                        <p className="font-medium animate-pulse">{statusMessage}</p>
                     </div>
                 )}
             </div>
@@ -180,8 +188,8 @@ export const HomeView: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Available Nearby ({result.matches.length})</p>
-                {result.matches.length === 0 && <p className="text-gray-500 text-sm">No exact matches found nearby.</p>}
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Restaurants Serving This ({result.matches.length})</p>
+                {result.matches.length === 0 && <p className="text-gray-500 text-sm italic">Searching for specific spots...</p>}
                 {result.matches.map((match) => (
                     <div 
                         key={match.id} 

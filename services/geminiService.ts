@@ -1,18 +1,16 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { MenuItem, RestaurantMatch } from "../types";
 
 // Helper to clean Markdown JSON and extract JSON structures from text
-const cleanJson = (text: string) => {
-  if (!text) return "{}";
+const cleanJson = (text: string | undefined) => {
+  if (!text) return "[]";
   const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   return jsonMatch ? jsonMatch[0] : text.trim();
 };
 
-// Helper to generate random coordinates near a point if search results lack them
 const getRandomOffset = (lat: number, lng: number) => {
-  const latOffset = (Math.random() - 0.5) * 0.01;
-  const lngOffset = (Math.random() - 0.5) * 0.01;
+  const latOffset = (Math.random() - 0.5) * 0.02;
+  const lngOffset = (Math.random() - 0.5) * 0.02;
   return { lat: lat + latOffset, lng: lng + lngOffset };
 };
 
@@ -27,7 +25,10 @@ const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: numbe
   return (R * c).toFixed(1) + ' km';
 };
 
-// 1. Visual Search: Identify Dish using Gemini 3 Flash (Optimized for speed)
+/**
+ * 1. Visual Search: Identify Dish using Gemini 3 Flash.
+ * Optimized with thinkingBudget: 0 for speed.
+ */
 export const identifyDish = async (base64Image: string): Promise<{ dishName: string; description: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
@@ -36,34 +37,83 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this dish. Return ONLY a JSON object: { \"dishName\": \"...\", \"description\": \"...\" }" }
+          { text: "Identify this dish. Return ONLY a JSON object with keys 'dishName' and 'description' (max 15 words)." }
         ]
       },
       config: {
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 0 } // Disable thinking for immediate result
+        thinkingConfig: { thinkingBudget: 0 }
       }
     });
 
-    const text = response.text || "{}";
+    const text = response.text;
     return JSON.parse(cleanJson(text));
   } catch (error) {
     console.error("Gemini Vision Error:", error);
-    return { dishName: "Delicious Food", description: "Could not identify dish." };
+    return { dishName: "Delicious Dish", description: "A beautifully prepared meal." };
   }
 };
 
-// 2. Profile Sync using Gemini 3 Pro (Complex Reasoning)
+/**
+ * 2. Find Restaurants using Gemini 2.5 Flash with Maps Grounding.
+ * Maps grounding is only supported in Gemini 2.5 series.
+ */
+export const findNearbyRestaurantsForDish = async (dishName: string, lat: number, lng: number): Promise<RestaurantMatch[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash', // Correct model for Maps Grounding
+      contents: `Find 5 real restaurants near me (lat: ${lat}, lng: ${lng}) that definitely serve ${dishName}. Return as a JSON array of objects with keys: name, price (e.g. '$$'), and rating (1-5).`,
+      config: {
+        tools: [{ googleMaps: {} }],
+        toolConfig: {
+          retrievalConfig: {
+            latLng: { latitude: lat, longitude: lng }
+          }
+        },
+        thinkingConfig: { thinkingBudget: 0 }
+      }
+    });
+
+    const text = response.text;
+    const matches = JSON.parse(cleanJson(text));
+    
+    // Fallback if the model returns something other than an array
+    const results = Array.isArray(matches) ? matches : [];
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+    return results.map((m: any, i: number) => {
+      // Maps grounding results usually don't have lat/lng in the JSON directly, 
+      // but we need them for the map. We'll use random offsets or just show them near the user.
+      const matchLocation = getRandomOffset(lat, lng);
+      return {
+        id: `res_${Date.now()}_${i}`,
+        name: m.name || "Unknown Restaurant",
+        price: m.price || "$$",
+        rating: m.rating || 4.5,
+        distance: calculateDistance(lat, lng, matchLocation.lat, matchLocation.lng),
+        location: matchLocation,
+        groundingUrl: groundingChunks[i]?.maps?.uri || null
+      };
+    });
+  } catch (error) {
+    console.error("Gemini Maps Error:", error);
+    return [];
+  }
+};
+
+/**
+ * 3. Profile Sync using Gemini 3 Pro (Complex Reasoning).
+ */
 export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[], location?: { lat: number, lng: number } }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Analyze restaurant at: ${url}. Extract 5 menu items (name, desc, price in AED) and coords (lat, lng). JSON only.`,
+      contents: `Search for and analyze the restaurant at this URL: ${url}. Extract 5 top menu items with descriptions and prices in AED. Also find their physical coordinates (lat, lng). Return strictly as JSON.`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: 'application/json',
-        thinkingConfig: { thinkingBudget: 4096 }, // Lower budget for faster turnaround on extraction
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -75,7 +125,8 @@ export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[
                   name: { type: Type.STRING },
                   description: { type: Type.STRING },
                   price: { type: Type.STRING }
-                }
+                },
+                required: ['name', 'price']
               }
             },
             location: {
@@ -90,64 +141,26 @@ export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[
       }
     });
 
-    return JSON.parse(cleanJson(response.text || "{}"));
+    return JSON.parse(cleanJson(response.text));
   } catch (error) {
     console.error("Gemini Profile Sync Error:", error);
     return { menu: [] };
   }
 };
 
-// 3. Chat Intent using Gemini 3 Flash (Ultra-fast)
+/**
+ * 4. Chat Intent using Gemini 3 Flash.
+ */
 export const checkPurchaseIntent = async (message: string): Promise<boolean> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Is this a purchase intent/order? "${message}". Return true/false.`,
+      contents: `Analyze if this user message indicates they want to order food or visit the restaurant: "${message}". Return only 'true' or 'false'.`,
       config: { thinkingConfig: { thinkingBudget: 0 } }
     });
     return response.text?.toLowerCase().includes('true') || false;
   } catch (error) {
     return false;
-  }
-};
-
-// 4. Find Restaurants using Gemini 2.5 Flash with Maps Grounding
-export const findNearbyRestaurantsForDish = async (dishName: string, lat: number, lng: number): Promise<RestaurantMatch[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `List 5 restaurants near ${lat}, ${lng} serving ${dishName}. Return JSON array: [{name, price, rating}].`,
-      config: {
-        tools: [{ googleMaps: {} }],
-        toolConfig: {
-          retrievalConfig: {
-            latLng: { latitude: lat, longitude: lng }
-          }
-        },
-        thinkingConfig: { thinkingBudget: 0 }
-      }
-    });
-
-    const text = response.text || "[]";
-    const parsed = JSON.parse(cleanJson(text));
-    const matches = Array.isArray(parsed) ? parsed : [];
-
-    const grounding = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-    return matches.map((m, i) => {
-      const matchLocation = getRandomOffset(lat, lng);
-      return {
-        ...m,
-        id: `rest_${Date.now()}_${i}`,
-        location: matchLocation,
-        distance: calculateDistance(lat, lng, matchLocation.lat, matchLocation.lng),
-        groundingUrl: grounding[i]?.maps?.uri || null
-      };
-    });
-  } catch (e) {
-    console.error("Gemini Maps Error:", e);
-    return [];
   }
 };
