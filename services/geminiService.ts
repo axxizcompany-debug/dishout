@@ -1,20 +1,25 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { MenuItem, RestaurantMatch } from "../types.ts";
 
 const cleanJson = (text: string | undefined) => {
   if (!text) return "[]";
+  
+  // Prioritize finding an array block first
   const firstBracket = text.indexOf('[');
   const lastBracket = text.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket !== -1) {
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
     return text.substring(firstBracket, lastBracket + 1);
   }
+  
+  // Then try to find an object block
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1) {
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       return text.substring(firstBrace, lastBrace + 1);
   }
-  return text.trim();
+  
+  // If no JSON-like structures are found, return an empty array string to prevent JSON.parse errors
+  return "[]";
 };
 
 const getRandomOffset = (lat: number, lng: number) => {
@@ -62,7 +67,9 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Find 5 top-rated restaurants serving ${dishName} near lat: ${lat}, lng: ${lng}. Return ONLY a JSON array: [{\"name\": \"...\", \"price\": \"$$\", \"rating\": 4.5}]`,
+      contents: `Search for real restaurants serving ${dishName} near lat: ${lat}, lng: ${lng}. 
+      Return ONLY a JSON array of objects. Each object MUST have: "name", "price" (e.g., "$$"), and "rating" (number).
+      If no restaurants are found, return exactly []. Do not include any text or conversation.`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: {
@@ -74,7 +81,8 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
       }
     });
 
-    const matches = JSON.parse(cleanJson(response.text));
+    const cleaned = cleanJson(response.text);
+    const matches = JSON.parse(cleaned);
     const results = Array.isArray(matches) ? matches : [];
     
     return results.map((m: any, i: number) => {
