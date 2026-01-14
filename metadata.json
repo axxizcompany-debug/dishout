@@ -1,5 +1,5 @@
 {
-  "name": "Copy of DishOut",
+  "name": "DishOut",
   "description": "A high-end food discovery app using AI visual search and localized restaurant matching.",
   "requestFramePermissions": [
     "camera",

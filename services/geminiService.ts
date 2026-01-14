@@ -11,8 +11,8 @@ const cleanJson = (text: string) => {
 
 // Helper to generate random coordinates near a point if search results lack them
 const getRandomOffset = (lat: number, lng: number) => {
-  const latOffset = (Math.random() - 0.5) * 0.02;
-  const lngOffset = (Math.random() - 0.5) * 0.02;
+  const latOffset = (Math.random() - 0.5) * 0.01;
+  const lngOffset = (Math.random() - 0.5) * 0.01;
   return { lat: lat + latOffset, lng: lng + lngOffset };
 };
 
@@ -27,7 +27,7 @@ const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: numbe
   return (R * c).toFixed(1) + ' km';
 };
 
-// 1. Visual Search: Identify Dish using Gemini 3 Flash
+// 1. Visual Search: Identify Dish using Gemini 3 Flash (Optimized for speed)
 export const identifyDish = async (base64Image: string): Promise<{ dishName: string; description: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
@@ -36,11 +36,12 @@ export const identifyDish = async (base64Image: string): Promise<{ dishName: str
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this dish. Return ONLY a JSON object with 'dishName' and 'description' (max 20 words)." }
+          { text: "Identify this dish. Return ONLY a JSON object: { \"dishName\": \"...\", \"description\": \"...\" }" }
         ]
       },
       config: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 0 } // Disable thinking for immediate result
       }
     });
 
@@ -58,13 +59,11 @@ export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Analyze the restaurant at this URL: ${url}. 
-      1. Extract 5 menu items (name, description, price in AED). 
-      2. Find the coordinates (lat, lng).
-      Return JSON only.`,
+      contents: `Analyze restaurant at: ${url}. Extract 5 menu items (name, desc, price in AED) and coords (lat, lng). JSON only.`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 4096 }, // Lower budget for faster turnaround on extraction
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -98,13 +97,14 @@ export const syncProfileFromUrl = async (url: string): Promise<{ menu: MenuItem[
   }
 };
 
-// 3. Chat Intent using Gemini 3 Flash
+// 3. Chat Intent using Gemini 3 Flash (Ultra-fast)
 export const checkPurchaseIntent = async (message: string): Promise<boolean> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Does this message indicate a clear intent to order or book? "${message}". Answer with true/false only.`,
+      contents: `Is this a purchase intent/order? "${message}". Return true/false.`,
+      config: { thinkingConfig: { thinkingBudget: 0 } }
     });
     return response.text?.toLowerCase().includes('true') || false;
   } catch (error) {
@@ -118,14 +118,15 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Find 5 specific restaurants near ${lat}, ${lng} that serve ${dishName}. Return a JSON array of objects with 'name', 'price' ($ to $$$$), and 'rating' (1-5).`,
+      contents: `List 5 restaurants near ${lat}, ${lng} serving ${dishName}. Return JSON array: [{name, price, rating}].`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: {
           retrievalConfig: {
             latLng: { latitude: lat, longitude: lng }
           }
-        }
+        },
+        thinkingConfig: { thinkingBudget: 0 }
       }
     });
 
@@ -133,7 +134,6 @@ export const findNearbyRestaurantsForDish = async (dishName: string, lat: number
     const parsed = JSON.parse(cleanJson(text));
     const matches = Array.isArray(parsed) ? parsed : [];
 
-    // Extract grounding URLs if available
     const grounding = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
     return matches.map((m, i) => {

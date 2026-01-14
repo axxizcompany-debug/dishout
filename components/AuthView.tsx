@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useAppStore } from '../services/store';
 import { UserType, Restaurant, User } from '../types';
@@ -57,76 +58,53 @@ export const AuthView: React.FC = () => {
     setError(null);
     setLoading(true);
 
-    // Simulate Network Latency
-    setTimeout(() => {
-        try {
-            const usersDb = JSON.parse(localStorage.getItem('dishout_users') || '{}');
-            const emailKey = formData.email.toLowerCase().trim();
+    // Optimized: Removed artificial 1200ms delay
+    try {
+        const usersDb = JSON.parse(localStorage.getItem('dishout_users') || '{}');
+        const emailKey = formData.email.toLowerCase().trim();
 
-            if (isLoginMode) {
-                // --- LOGIN FLOW ---
-                const userRecord = usersDb[emailKey];
-                
-                if (!userRecord) {
-                    throw new Error("Account not found. Please sign up.");
-                }
-                
-                if (userRecord.password !== formData.password) {
-                    throw new Error("Incorrect password.");
-                }
+        if (isLoginMode) {
+            const userRecord = usersDb[emailKey];
+            if (!userRecord) throw new Error("Account not found. Please sign up.");
+            if (userRecord.password !== formData.password) throw new Error("Incorrect password.");
+            dispatch({ type: 'LOGIN_USER', payload: userRecord.profile });
+        } else {
+            if (usersDb[emailKey]) throw new Error("Email already registered. Please log in.");
+            const timestamp = Date.now();
+            const baseUser = {
+                id: `user_${timestamp}`,
+                name: formData.name,
+                email: formData.email,
+                avatar: `https://ui-avatars.com/api/?name=${formData.name}&background=random`,
+            };
 
-                // Success
-                dispatch({ type: 'LOGIN_USER', payload: userRecord.profile });
-
+            let userProfile;
+            if (role === UserType.RESTAURANT) {
+                userProfile = {
+                    ...baseUser,
+                    type: UserType.RESTAURANT,
+                    location: { lat: formData.lat, lng: formData.lng }, 
+                    website: formData.website,
+                    leads: 0,
+                    balance: 0,
+                    menu: []
+                };
             } else {
-                // --- SIGN UP FLOW ---
-                if (usersDb[emailKey]) {
-                    throw new Error("Email already registered. Please log in.");
-                }
-
-                const timestamp = Date.now();
-                const baseUser = {
-                    id: `user_${timestamp}`,
-                    name: formData.name,
-                    email: formData.email,
-                    avatar: `https://ui-avatars.com/api/?name=${formData.name}&background=random`,
+                userProfile = {
+                    ...baseUser,
+                    type: UserType.USER
                 };
-
-                let userProfile;
-
-                if (role === UserType.RESTAURANT) {
-                    userProfile = {
-                        ...baseUser,
-                        type: UserType.RESTAURANT,
-                        location: { lat: formData.lat, lng: formData.lng }, 
-                        website: formData.website,
-                        leads: 0,
-                        balance: 0,
-                        menu: []
-                    };
-                } else {
-                    userProfile = {
-                        ...baseUser,
-                        type: UserType.USER
-                    };
-                }
-
-                // Save to DB
-                usersDb[emailKey] = {
-                    profile: userProfile,
-                    password: formData.password
-                };
-                localStorage.setItem('dishout_users', JSON.stringify(usersDb));
-
-                // Auto Login
-                dispatch({ type: 'LOGIN_USER', payload: userProfile });
             }
-        } catch (err: any) {
-            setError(err.message || "Something went wrong");
-        } finally {
-            setLoading(false);
+
+            usersDb[emailKey] = { profile: userProfile, password: formData.password };
+            localStorage.setItem('dishout_users', JSON.stringify(usersDb));
+            dispatch({ type: 'LOGIN_USER', payload: userProfile });
         }
-    }, 1200);
+    } catch (err: any) {
+        setError(err.message || "Something went wrong");
+    } finally {
+        setLoading(false);
+    }
   };
 
   const toggleMode = () => {
@@ -137,14 +115,12 @@ export const AuthView: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-[#0f0718] overflow-y-auto">
-      {/* Dynamic Background */}
       <div className="fixed inset-0 z-0 pointer-events-none">
           <div className="absolute top-0 left-0 w-full h-full bg-[url('https://images.unsplash.com/photo-1555396273-367ea4eb4db5?q=80&w=1974&auto=format&fit=crop')] bg-cover bg-center opacity-20"></div>
           <div className="absolute inset-0 bg-gradient-to-b from-[#0f0718] via-[#0f0718]/90 to-[#0f0718]"></div>
       </div>
       
       <div className="min-h-full flex flex-col items-center justify-center relative z-10 p-6 py-12">
-        {/* Logo Area */}
         <div className="text-center space-y-2 mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-gradient-to-br from-purple-600 to-indigo-600 shadow-lg shadow-purple-900/50 mb-4 transform rotate-12">
                 <MapPin className="text-white transform -rotate-12" size={32} />
@@ -155,9 +131,7 @@ export const AuthView: React.FC = () => {
             <p className="text-purple-200/60 text-lg">Connect through flavor & location.</p>
         </div>
 
-        {/* Auth Card */}
         <div className="w-full max-w-md bg-[#1a0b2e]/80 backdrop-blur-xl border border-purple-500/20 rounded-3xl p-6 shadow-2xl animate-fade-in-up">
-            
             <div className="flex justify-center mb-6 border-b border-white/10 pb-4">
                 <button 
                     onClick={() => !loading && setIsLoginMode(true)}
@@ -173,7 +147,6 @@ export const AuthView: React.FC = () => {
                 </button>
             </div>
 
-            {/* Role Toggles - Only visible in Sign Up */}
             {!isLoginMode && (
                 <div className="grid grid-cols-2 gap-2 p-1 bg-[#0f0718]/50 rounded-xl mb-6 animate-fade-in">
                     <button 
@@ -199,17 +172,13 @@ export const AuthView: React.FC = () => {
                 </div>
             )}
 
-            {/* Error Message */}
             {error && (
                 <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-2 text-red-200 text-xs font-bold animate-shake">
                     <AlertCircle size={16} /> {error}
                 </div>
             )}
 
-            {/* Form */}
             <form onSubmit={handleAuth} className="space-y-4">
-                
-                {/* Name / Business Name (Sign Up Only) */}
                 {!isLoginMode && (
                     <div className="space-y-1 animate-slide-up">
                         <label className="text-xs text-purple-300 ml-1">
@@ -245,7 +214,6 @@ export const AuthView: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Location Input (Sign Up Restaurant Only) */}
                 {!isLoginMode && role === UserType.RESTAURANT && (
                     <div className="space-y-1 animate-slide-up">
                         <label className="text-xs text-purple-300 ml-1">Business Location</label>
@@ -271,7 +239,6 @@ export const AuthView: React.FC = () => {
                     </div>
                 )}
 
-                {/* Website (Sign Up Restaurant Only) */}
                 {!isLoginMode && role === UserType.RESTAURANT && (
                     <div className="space-y-1 animate-slide-up">
                         <label className="text-xs text-purple-300 ml-1">Website URL (Optional)</label>
@@ -311,21 +278,13 @@ export const AuthView: React.FC = () => {
                             : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
                     }`}
                 >
-                    {loading ? (
-                        <Loader2 className="animate-spin" />
-                    ) : (
-                        <>
-                            {isLoginMode ? 'Sign In' : 'Create Account'} <ArrowRight size={18} />
-                        </>
-                    )}
+                    {loading ? <Loader2 className="animate-spin" /> : <>{isLoginMode ? 'Sign In' : 'Create Account'} <ArrowRight size={18} /></>}
                 </button>
             </form>
         </div>
 
         <p className="text-xs text-gray-500 text-center mt-6">
-            {isLoginMode 
-                ? "Don't have an account yet?" 
-                : "Already have an account?"}
+            {isLoginMode ? "Don't have an account yet?" : "Already have an account?"}
             <button onClick={toggleMode} className="ml-1 text-purple-400 hover:text-white font-bold transition-colors">
                 {isLoginMode ? "Sign Up" : "Log In"}
             </button>
